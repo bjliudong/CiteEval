@@ -235,12 +235,21 @@ def build_json(json_data: dict):
         logger.info(f"保存搜索关键词到{query_keyword_file}文件成功！")
 
         params['q'] = keyword
-        # 调用 SerpApi 进行检索
-        search = google_search.GoogleSearch(params)
-        search_result = search.get_dict()
-        # 将检索到的结果保存下来
-        misc.save_json_file(search_result, search_result_file, 'single', 'w')
-        logger.info(f"保存搜索结果到{search_result_file}文件成功！")
+        # 检查搜索结果文件是否已存在，如果存在则从文件中读取搜索结果，避免重复调用 SerpApi 进行检索
+        if os.path.exists(search_result_file):
+            # 如果文件已存在，从文件中读取搜索结果
+            with open(search_result_file, 'r', encoding='utf-8') as file:
+                search_result = json.load(file)
+            logger.info(f"从文件{search_result_file}中读取已有搜索结果")
+        else:
+            # 如果文件不存在，调用 SerpApi 进行检索
+            search = google_search.GoogleSearch(params)
+            search_result = search.get_dict()
+            # 将检索到的结果保存下来
+            misc.save_json_file(search_result, search_result_file, 'single', 'w')
+            logger.info(f"保存搜索结果到{search_result_file}文件成功！")
+        
+        # 将搜索到的ref数据补充到原有的json数据中
         new_contents.append(supplement_ref(search_result, contents[i], lang))
 
     json_data['conversations']['contents'] = new_contents
