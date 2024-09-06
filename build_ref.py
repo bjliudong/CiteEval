@@ -271,7 +271,7 @@ def main():
             # 如果本条记录已经处理过则跳过
             if(misc.check_file_exists(f"{data_dir}/{row_dict['conversation_hash']}.json")):
                 continue
-            logger.info(f"开始处理，序号：{count}，id: {row_dict['id']}")
+            logger.info(f"开始处理，序号：{count}，id: {row_dict['id']}，hash: {row_dict['conversation_hash']}")
             json_dict = build_json(row_dict)
             json_filename = f"{output_dir}/{row_dict['conversation_hash']}.json"
             misc.save_json_file(json_dict, json_filename, "multi")
