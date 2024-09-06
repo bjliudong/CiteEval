@@ -1,4 +1,4 @@
-import os, json
+import os, json, time
 import logging
 from serpapi import google_search
 import html2text
@@ -9,6 +9,7 @@ import misc
 from misc import time_it
 from misc import time_it_s
 import ollama
+from tqdm import tqdm
 
 data_file = "wildchat_filter.data"
 output_dir = "temp"
@@ -92,7 +93,7 @@ def get_webpage_content(url):
 
 # 抓取指定网址的pdf文件
 @time_it
-def get_pdf_content(url):
+def get_pdf_content(url, timeout=5, max_download_time=600):
     logger.info(f"开始抓取pdf，{url}")
     try:
         # 生成随机的UUID作为文件名
@@ -100,15 +101,32 @@ def get_pdf_content(url):
         file_path = os.path.join(output_dir, file_name)
         
         # 发送HTTP GET请求
-        response = requests.get(url, stream=True, timeout=5)
+        response = requests.get(url, stream=True, timeout=timeout)
         
         # 检查请求是否成功
         if response.status_code == 200:
-            # 打开文件进行写入
-            with open(file_path, 'wb') as file:
+            # 获取文件总大小
+            total_size = int(response.headers.get('content-length', 0))
+            if total_size == 0:
+                logger.warning("无法获取文件大小，进度条可能无法正确显示。")
+            
+            start_time = time.time()
+            # 打开文件进行写入，并显示进度条
+            with open(file_path, 'wb') as file, tqdm(
+                desc=file_name,
+                total=total_size,
+                unit='iB',
+                unit_scale=True,
+                unit_divisor=1024,
+            ) as progress_bar:
                 # 写入内容到文件
                 for chunk in response.iter_content(chunk_size=8192):
-                    file.write(chunk)
+                    if time.time() - start_time > max_download_time:
+                        logger.error(f"下载时间超过{max_download_time}秒，强制中断下载。")
+                        return None
+                    size = file.write(chunk)
+                    progress_bar.update(size)
+            
             # 打印下载成功的消息
             logger.info(f"PDF文件已下载并保存到：{file_path}")
         else:
