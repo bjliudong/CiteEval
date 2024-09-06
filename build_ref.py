@@ -144,6 +144,9 @@ def gen_summ(question, title, text, lang):
 # 根据输入的 serpapi 搜索到的 json 数据，抽取有用的内容补充到原有字典中，并返回更新后的dict
 def supplement_ref(serpapi_json: dict, content: dict, lang):
     count = 0
+    if serpapi_json['search_information']['total_results'] == 0:
+        logger.info(f"搜索结果为空，忽略本条记录！！")
+        return content
     organic_results = serpapi_json['organic_results']
     references = []
     for index, item in enumerate(organic_results):
