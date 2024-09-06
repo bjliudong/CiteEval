@@ -9,6 +9,9 @@ import logging.config
 import yaml
 import inspect
 import tiktoken
+from concurrent.futures import ThreadPoolExecutor
+from tqdm import tqdm
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -95,3 +98,133 @@ def calculate_token_count(text, logger, model='gpt-3.5-turbo'):
     word_count = len(text)
     logger.info(f"Token count: {token_count}\nOriginal Text Count: {word_count}")
     return token_count
+
+# 下载文件
+def download_file(url, num_threads=5, filename='download.pdf', is_single=False, chunk_size=1024*1024):
+    try:
+        file_size = get_file_size(url)
+        if not is_single and file_size is not None:
+            download_pdf_multi_thread(url, num_threads, filename, file_size)
+        else:
+            download_pdf_chunked(url, num_threads, filename, chunk_size)
+    except Exception as e:
+        logger.info(f"发生错误: {e}")
+        logger.info("将使用单线程下载方式")
+        download_file_single_thread(url, filename)
+
+
+# 定义一个下载PDF部分的函数
+def download_chunk(url, start, end, filename):
+    headers = {'Range': f'bytes={start}-{end}'}
+    with requests.get(url, headers=headers, stream=True) as r:
+        r.raise_for_status()
+        with open(filename, 'r+b') as f:
+            f.seek(start)
+            f.write(r.content)
+
+def download_pdf_chunked(url, num_threads, filename, chunk_size):
+    with open(filename, 'wb') as f:
+        pass  # 创建空文件
+
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        offset = 0
+        while True:
+            futures = []
+            for _ in range(num_threads):
+                future = executor.submit(download_chunk_no_size, url, offset, offset + chunk_size - 1, filename)
+                futures.append(future)
+                offset += chunk_size
+
+            completed = False
+            for future in futures:
+                result = future.result()
+                if not result:
+                    completed = True
+                    break
+
+            if completed:
+                break
+
+def download_chunk_no_size(url, start, end, filename):
+    headers = {'Range': f'bytes={start}-{end}'}
+    with requests.get(url, headers=headers, stream=True) as r:
+        if r.status_code == 416:  # 请求范围不满足
+            return False
+        r.raise_for_status()
+        with open(filename, 'r+b') as f:
+            f.seek(start)
+            f.write(r.content)
+    return True
+
+# 计算文件总大小
+def get_file_size(url):
+    try:
+        response = requests.head(url)
+        response.raise_for_status()
+        return int(response.headers.get('Content-Length', 0))
+    except:
+        return None
+
+# 多线程下载函数
+@time_it_s
+def download_pdf_multi_thread(url, num_threads, filename, file_size):
+    part_size = file_size // num_threads
+    # 创建一个空的文件
+    with open(filename, 'wb') as f:
+        f.truncate(file_size)
+    
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = []
+        with tqdm(total=file_size, unit='B', unit_scale=True, desc=filename) as pbar:
+            for i in range(num_threads):
+                start = i * part_size
+                end = (i + 1) * part_size - 1 if i < num_threads - 1 else file_size - 1
+                future = executor.submit(download_chunk_with_progress, url, start, end, filename, pbar)
+                futures.append(future)
+            
+            for future in futures:
+                future.result()  # 等待每个线程完成
+
+def download_chunk_with_progress(url, start, end, filename, pbar):
+    headers = {'Range': f'bytes={start}-{end}'}
+    with requests.get(url, headers=headers, stream=True) as r:
+        r.raise_for_status()
+        with open(filename, 'r+b') as f:
+            f.seek(start)
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    pbar.update(len(chunk))
+    return True
+
+
+# 单线程下载文件的函数
+@time_it_s
+def download_file_single_thread(url, filename='output.pdf'):
+    try:
+        # 发送GET请求获取文件内容
+        response = requests.get(url, stream=True)
+        response.raise_for_status()  # 如果请求不成功则抛出异常
+        
+        # 获取文件总大小
+        file_size = int(response.headers.get('Content-Length', 0))
+        if file_size == 0:
+            logger.warning("警告：无法获取文件大小，进度条可能无法正确显示。")
+        
+        # 打开文件准备写入
+        with open(filename, 'wb') as file, tqdm(
+            desc=filename,
+            total=file_size,
+            unit='iB',
+            unit_scale=True,
+            unit_divisor=1024,
+        ) as progress_bar:
+            for data in response.iter_content(chunk_size=1024):
+                size = file.write(data)
+                progress_bar.update(size)
+        
+        logger.info(f"文件 {filename} 下载完成")
+    except requests.RequestException as e:
+        logger.info(f"下载失败: {e}")
+    except IOError as e:
+        logger.info(f"写入文件时出错: {e}")
