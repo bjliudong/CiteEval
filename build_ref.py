@@ -10,9 +10,11 @@ from misc import time_it
 from misc import time_it_s
 import ollama
 from tqdm import tqdm
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 data_file = "wildchat_filter.data"
-output_dir = "temp"
+temp_dir = "temp"
 data_dir = "data"
 LLM_model = "qwen2:7b"
 prompt_q2k_en = "As a search engine expert, please rewrite the following query content as several search keywords, and the total word count of the generated search keywords should not exceed 200 words. The returned keywords should be separated by commas."
@@ -20,23 +22,6 @@ prompt_q2k_cn = "你作为搜索引擎专家，请重写下面的查询内容为
 prompt_summ_cn = "用感兴趣的问题在100个字内总结以下正文。如果文档与问题无关，请返回“不相关”。尽量保留所有重要的日期、数字和姓名。\n\n"
 prompt_summ_en = "Summarize the following document within 50 words with the question of interest Return \"irrelevant\" if the document is irrelevant to the question. Try to keep all the important dates, numbers, and names.\n\n"
 logger = logging.getLogger(__name__)
-
-# 将文件从临时目录移动到目标数据目录
-@time_it
-def move_files(temp_dir, data_dir):
-    # 创建Path对象
-    temp_path = Path(temp_dir)
-    data_path = Path(data_dir)
-
-    # 确保目标目录存在
-    data_path.mkdir(parents=True, exist_ok=True)
-
-    # 遍历源目录中的所有文件并移动
-    for file_path in temp_path.iterdir():
-        if file_path.is_file():  # 确保是文件
-            destination_path = data_path / file_path.name
-            file_path.replace(destination_path)  # 移动文件
-            logger.debug(f"文件 '{file_path.name}' 已移动到 '{data_path}'。")
 
 # 调用 LLM 将输入的问答对，转换为查询关键词
 @time_it_s
@@ -93,12 +78,12 @@ def get_webpage_content(url):
 
 # 抓取指定网址的pdf文件
 @time_it
-def get_pdf_content(url, timeout=5, max_download_time=600):
+def get_pdf_content(url, conversation_hash, timeout=5, max_download_time=300):
     logger.info(f"开始抓取pdf，{url}")
     try:
         # 生成随机的UUID作为文件名
         file_name = str(uuid.uuid4()) + '.pdf'
-        file_path = os.path.join(output_dir, file_name)
+        file_path = os.path.join(f"{temp_dir}/{conversation_hash}", file_name)
         
         # 发送HTTP GET请求
         response = requests.get(url, stream=True, timeout=timeout)
@@ -160,7 +145,7 @@ def gen_summ(question, title, text, lang):
     return llm_answer(prompt)
 
 # 根据输入的 serpapi 搜索到的 json 数据，抽取有用的内容补充到原有字典中，并返回更新后的dict
-def supplement_ref(serpapi_json: dict, content: dict, lang):
+def supplement_ref(serpapi_json: dict, content: dict, lang, conversation_hash):
     count = 0
     if serpapi_json['search_information']['total_results'] == 0:
         logger.info(f"搜索结果为空，忽略本条记录！！")
@@ -182,7 +167,7 @@ def supplement_ref(serpapi_json: dict, content: dict, lang):
         url = str(link).lower()
         if url.endswith('pdf'):
             ref['type'] = 'PDF'
-            c = get_pdf_content(link)
+            c = get_pdf_content(link, conversation_hash)
         elif url.endswith('txt'):
             ref['type'] = 'Text'
             c = get_webpage_content(link)
@@ -214,8 +199,8 @@ def build_json(json_data: dict):
     lang = json_data['conversations']['lang']
     contents = json_data['conversations']['contents']
     new_contents = []
-    query_keyword_file = f"{output_dir}/{json_data['conversation_hash']}_keyword.data"
-    search_result_file = f"{output_dir}/{json_data['conversation_hash']}_search.data"
+    query_keyword_file = f"{temp_dir}/{json_data['conversation_hash']}/{json_data['conversation_hash']}_keyword.data"
+    search_result_file = f"{temp_dir}/{json_data['conversation_hash']}/{json_data['conversation_hash']}_search.data"
     params = {
         "num": "100",
         "api_key": os.environ.get("SERPAPI_KEY"), 
@@ -274,31 +259,49 @@ def build_json(json_data: dict):
             logger.info(f"保存搜索结果到{search_result_file}文件成功！")
         
         # 将搜索到的ref数据补充到原有的json数据中
-        new_contents.append(supplement_ref(search_result, contents[i], lang))
+        new_contents.append(supplement_ref(search_result, contents[i], lang, json_data['conversation_hash']))
 
     json_data['conversations']['contents'] = new_contents
     return json_data
 
+def process_single_record(line, count, temp_dir, data_dir):
+    row_dict = json.loads(line)
+    # 如果本条记录已经处理过则跳过
+    if(misc.check_file_exists(f"{data_dir}/{row_dict['conversation_hash']}.json")):
+        return
+    logger.info(f"开始处理，序号：{count}，id: {row_dict['id']}，hash: {row_dict['conversation_hash']}")
+    json_dict = build_json(row_dict)
+    json_filename = f"{temp_dir}/{row_dict['conversation_hash']}/{row_dict['conversation_hash']}.json"
+    misc.save_json_file(json_dict, json_filename, "multi")
+    logger.info(f"保存文件{json_filename}成功！")
+    # 将刚才处理过的所有文件从临时目录移动到目标数据目录，并删除临时目录
+    misc.move_files(f"{temp_dir}/{row_dict['conversation_hash']}", data_dir)
+    os.rmdir(f"{temp_dir}/{row_dict['conversation_hash']}")
+    logger.info(f"处理完成，序号：{count}，id: {row_dict['id']}，hash: {row_dict['conversation_hash']}")
+
 def main():
     # 确保输出目录存在
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    count = 0
+    if not os.path.exists(temp_dir):
+        os.makedirs(temp_dir)
+    
+    # 使用线程安全的计数器
+    count = threading.atomic.AtomicInteger(0)
+    
+    # 创建一个线程安全的锁，用于文件操作
+    file_lock = threading.Lock()
+    
     # 打开输入文件进行读取
     with open(data_file, 'r', encoding='utf-8') as file:
-        count = count + 1
-        for line in file:
-            row_dict = json.loads(line)
-            # 如果本条记录已经处理过则跳过
-            if(misc.check_file_exists(f"{data_dir}/{row_dict['conversation_hash']}.json")):
-                continue
-            logger.info(f"开始处理，序号：{count}，id: {row_dict['id']}，hash: {row_dict['conversation_hash']}")
-            json_dict = build_json(row_dict)
-            json_filename = f"{output_dir}/{row_dict['conversation_hash']}.json"
-            misc.save_json_file(json_dict, json_filename, "multi")
-            logger.info(f"保存文件{json_filename}成功！")
-            # 将刚才处理过的所有文件从临时目录移动到目标数据目录
-            move_files(output_dir, data_dir)
+        lines = file.readlines()
+    
+    # 创建一个线程池
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        # 提交所有任务到线程池
+        futures = [executor.submit(process_single_record, line, count.increment(), temp_dir, data_dir) for line in lines]
+        
+        # 等待所有任务完成
+        for future in tqdm(as_completed(futures), total=len(lines)):
+            future.result()
 
 if __name__ == "__main__":
     misc.setup_logging()
