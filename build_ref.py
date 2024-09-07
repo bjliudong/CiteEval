@@ -284,24 +284,27 @@ def main():
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
     
-    # 使用线程安全的计数器
-    count = threading.atomic.AtomicInteger(0)
-    
-    # 创建一个线程安全的锁，用于文件操作
-    file_lock = threading.Lock()
+    # 使用普通计数器和锁
+    count = 0
+    count_lock = threading.Lock()
     
     # 打开输入文件进行读取
     with open(data_file, 'r', encoding='utf-8') as file:
         lines = file.readlines()
     
+    def process_with_count(line):
+        nonlocal count
+        with count_lock:
+            count += 1
+            current_count = count
+        process_single_record(line, current_count, temp_dir, data_dir)
+
     # 创建一个线程池
     with ThreadPoolExecutor(max_workers=10) as executor:
         # 提交所有任务到线程池
-        futures = [executor.submit(process_single_record, line, count.increment(), temp_dir, data_dir) for line in lines]
-        
-        # 等待所有任务完成
-        for future in tqdm(as_completed(futures), total=len(lines)):
-            future.result()
+        list(tqdm(executor.map(process_with_count, lines), total=len(lines)))
+
+    logger.info(f"总共处理了 {count} 条记录")
 
 if __name__ == "__main__":
     misc.setup_logging()
