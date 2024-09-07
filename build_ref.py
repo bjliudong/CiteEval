@@ -108,7 +108,7 @@ def get_pdf_content(url, conversation_hash, timeout=5, max_download_time=300):
                 for chunk in response.iter_content(chunk_size=8192):
                     if time.time() - start_time > max_download_time:
                         logger.error(f"下载时间超过{max_download_time}秒，强制中断下载。")
-                        return None
+                        return None, file_name
                     size = file.write(chunk)
                     progress_bar.update(size)
             
@@ -116,26 +116,26 @@ def get_pdf_content(url, conversation_hash, timeout=5, max_download_time=300):
             logger.info(f"PDF文件已下载并保存到：{file_path}")
         else:
             logger.info(f"下载失败，状态码：{response.status_code}, 地址：{url}")
-            return None  # 返回None表示下载失败
+            return None, file_name  # 返回None表示下载失败
     except requests.exceptions.Timeout as e:
         logger.error(f"抓取PDF连接超时: {e}")
-        return None
+        return None, file_name
     except requests.RequestException as e:
         logger.error(f"请求URL时发生错误：{e}, 地址：{url}")
-        return None  # 返回None表示请求失败
+        return None, file_name  # 返回None表示请求失败
     except Exception as e:
         logger.error(f"An unexpected error occurred: {e}, 地址：{url}")
-        return None
+        return None, file_name
 
     try:
         # 尝试打开PDF文件并读取文本
         with pymupdf.open(file_path) as doc:
             text = '\n'.join([page.get_text() for page in doc])
         # logger.info(f"抓取：{file_path}文件内容成功！")
-        return text
+        return text, file_name
     except Exception as e:
         logger.error(f"打开或读取PDF文件时发生错误：{e}")
-        return None
+        return None, file_name
 
 def gen_summ(question, title, text, lang):
     if lang == 'Chinese':
@@ -154,6 +154,7 @@ def supplement_ref(serpapi_json: dict, content: dict, lang, conversation_hash):
     references = []
     for index, item in enumerate(organic_results):
         ref = {}
+        pdf_file_name = ""
         ref['ref_id'] = misc.generate_random_code()
         ref['idx'] = index
         ref['index'] = item['position']
@@ -167,7 +168,7 @@ def supplement_ref(serpapi_json: dict, content: dict, lang, conversation_hash):
         url = str(link).lower()
         if url.endswith('pdf'):
             ref['type'] = 'PDF'
-            c = get_pdf_content(link, conversation_hash)
+            c, pdf_file_name = get_pdf_content(link, conversation_hash)
         elif url.endswith('txt'):
             ref['type'] = 'Text'
             c = get_webpage_content(link)
@@ -177,11 +178,13 @@ def supplement_ref(serpapi_json: dict, content: dict, lang, conversation_hash):
         else:
             ref['type'] = 'WebPage'
             c = get_webpage_content(link)
+
         if c is None:
             logger.info("无法抓取url地址内容，忽略本条记录！！")
             continue
         else:
             ref['main_body'] = c
+            ref['pdf_file_name'] = pdf_file_name
             if count < 10:
                 summ = gen_summ(content['query'], item['title'], c, lang)
                 ref['summary'] = summ
