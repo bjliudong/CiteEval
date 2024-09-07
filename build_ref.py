@@ -270,6 +270,9 @@ def process_single_record(line, count, temp_dir, data_dir):
     if(misc.check_file_exists(f"{data_dir}/{row_dict['conversation_hash']}.json")):
         return
     logger.info(f"开始处理，序号：{count}，id: {row_dict['id']}，hash: {row_dict['conversation_hash']}")
+    # 确保临时目录存在
+    if not os.path.exists(f"{temp_dir}/{row_dict['conversation_hash']}"):
+        os.makedirs(f"{temp_dir}/{row_dict['conversation_hash']}")
     json_dict = build_json(row_dict)
     json_filename = f"{temp_dir}/{row_dict['conversation_hash']}/{row_dict['conversation_hash']}.json"
     misc.save_json_file(json_dict, json_filename, "multi")
