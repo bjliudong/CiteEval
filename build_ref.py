@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 def llm_answer(query_string):
     try:
         client = ollama.Client(host=os.environ.get('OLLAMA_HTTP'))
-        response = ollama.chat(model=LLM_model, messages=[
+        response = client.chat(model=LLM_model, messages=[
         {
             'role': 'user',
             'content': query_string,
