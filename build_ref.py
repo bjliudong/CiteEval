@@ -184,7 +184,8 @@ def supplement_ref(serpapi_json: dict, content: dict, lang, conversation_hash):
             continue
         else:
             ref['main_body'] = c
-            ref['pdf_file_name'] = pdf_file_name
+            if url.endswith('pdf'):
+                ref['pdf_file_name'] = pdf_file_name
             if count < 10:
                 summ = gen_summ(content['query'], item['title'], c, lang)
                 ref['summary'] = summ
