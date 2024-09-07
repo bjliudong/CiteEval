@@ -257,7 +257,11 @@ def build_json(json_data: dict):
         else:
             # 如果文件不存在，调用 SerpApi 进行检索
             search = google_search.GoogleSearch(params)
-            search_result = search.get_dict()
+            try:
+                search_result = search.get_dict()
+            except Exception as e:
+                logger.error(f"获取搜索结果时发生错误：{e}")
+                search_result = None
             # 将检索到的结果保存下来
             misc.save_json_file(search_result, search_result_file, 'single', 'w')
             logger.info(f"保存搜索结果到{search_result_file}文件成功！")
