@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import json
 import string
 import random
@@ -228,3 +229,20 @@ def download_file_single_thread(url, filename='output.pdf'):
         logger.info(f"下载失败: {e}")
     except IOError as e:
         logger.info(f"写入文件时出错: {e}")
+
+# 将文件从临时目录移动到目标数据目录
+@time_it
+def move_files(temp_dir, data_dir):
+    # 创建Path对象
+    temp_path = Path(temp_dir)
+    data_path = Path(data_dir)
+
+    # 确保目标目录存在
+    data_path.mkdir(parents=True, exist_ok=True)
+
+    # 遍历源目录中的所有文件并移动
+    for file_path in temp_path.iterdir():
+        if file_path.is_file():  # 确保是文件
+            destination_path = data_path / file_path.name
+            file_path.replace(destination_path)  # 移动文件
+            logger.debug(f"文件 '{file_path.name}' 已移动到 '{data_path}'。")
