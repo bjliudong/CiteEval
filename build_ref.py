@@ -173,7 +173,10 @@ def supplement_ref(serpapi_json: dict, content: dict, lang):
         ref['idx'] = index
         ref['index'] = item['position']
         ref['title'] = item['title']
-        ref['snippet'] = item['snippet']
+        try:
+            ref['snippet'] = item['snippet']
+        except KeyError:
+            ref['snippet'] = ""  # 如果没有snippet，设置为空字符串
         link = item['link']
         ref['url'] = link
         url = str(link).lower()
