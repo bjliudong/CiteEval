@@ -96,17 +96,25 @@ def del_empty_summary_from_references(references):
 
 def process_json_files(directory):
     """遍历指定目录下的所有JSON文件，并执行上述功能"""
+    total_count = 0
+    empty_count = 0
+    process_count = 0
     for filename in os.listdir(directory):
         if filename.endswith('.json'):
             file_path = os.path.join(directory, filename)
             if is_zero_byte_json(file_path):
                 logger.info(f"Zero byte file found: {file_path}")
+                empty_count += 1
                 continue
             count = 0
             data_dict = read_json_file(file_path)
             data_dict, count = process_contents_from_dict(data_dict)
             write_json_file(file_path, data_dict)
-            logger.info(f"处理完成{filename}，删除的无效reference数量: {count}")
+            logger.info(f"序号{total_count+1}，处理完成{filename}，删除的无效reference数量: {count}")
+            if count > 0:
+                process_count += 1
+            total_count += 1
+    logger.info(f"处理完成，总处理数量：{total_count}，空文件数量: {empty_count}，有效处理文件数量: {process_count}")
 
 if __name__ == "__main__":
     misc.setup_logging()
