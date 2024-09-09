@@ -131,10 +131,18 @@ def get_pdf_content(url, conversation_hash, timeout=5, max_download_time=300):
         # 尝试打开PDF文件并读取文本
         with pymupdf.open(file_path) as doc:
             text = '\n'.join([page.get_text() for page in doc])
-        # logger.info(f"抓取：{file_path}文件内容成功！")
+        logger.info(f"读取：{file_path}文件内容成功！")
         return text, file_name
+    except pymupdf.errors.MuPDFError as e:
+        if "zlib error: invalid distance too far back" in str(e):
+            logger.error(f"PDF文件可能已损坏或格式不正确：{e}")
+        elif "syntax error" in str(e):
+            logger.error(f"PDF文件可能包含语法错误：{e}")
+        else:
+            logger.error(f"打开或读取PDF文件时发生MuPDF错误：{e}")
+        return None, file_name
     except Exception as e:
-        logger.error(f"打开或读取PDF文件时发生错误：{e}")
+        logger.error(f"打开或读取PDF文件时发生未知错误：{e}")
         return None, file_name
 
 def gen_summ(question, title, text, lang):
