@@ -12,6 +12,7 @@ import ollama
 from tqdm import tqdm
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from PyPDF2 import PdfFileReader
 
 data_file = "wildchat_filter.data"
 temp_dir = "temp"
@@ -126,7 +127,11 @@ def get_pdf_content(url, conversation_hash, timeout=5, max_download_time=300):
     except Exception as e:
         logger.error(f"An unexpected error occurred: {e}, 地址：{url}")
         return None, file_name
+    
+    return read_pdf_by_pypdf2(file_path), file_name
 
+# 利用 pymupdf 读取指定路径的 pdf 文件内容
+def read_pdf_by_pymupdf(file_path):
     try:
         # 尝试打开PDF文件并读取文本
         with pymupdf.open(file_path) as doc:
@@ -143,7 +148,7 @@ def get_pdf_content(url, conversation_hash, timeout=5, max_download_time=300):
             else:
                 text = text.strip()  # 移除开头和结尾的空白字符
         logger.info(f"读取：{file_path}文件内容成功！")
-        return text, file_name
+        return text
     except pymupdf.errors.FileDataError as e:
         if "zlib error: invalid distance too far back" in str(e):
             logger.error(f"PDF文件可能已损坏或格式不正确：{e}")
@@ -151,10 +156,39 @@ def get_pdf_content(url, conversation_hash, timeout=5, max_download_time=300):
             logger.error(f"PDF文件可能包含语法错误：{e}")
         else:
             logger.error(f"打开或读取PDF文件时发生MuPDF错误：{e}")
-        return None, file_name
+        return None
     except Exception as e:
         logger.error(f"打开或读取PDF文件时发生未知错误：{e}")
-        return None, file_name
+        return None
+
+# 利用 PyPDF2 读取指定路径的 pdf 文件内容
+def read_pdf_by_pypdf2(filepath):
+    try:
+        # 打开PDF文件
+        with open(filepath, 'rb') as file:
+            # 创建PDF阅读器对象
+            pdf_reader = PdfFileReader(file)
+            # 获取PDF文档的页数
+            num_pages = pdf_reader.numPages
+            logger.info(f"该PDF文件总共有 {num_pages} 页")
+            
+            # 读取每一页的内容
+            content = []
+            for page_num in range(num_pages):
+                # 获取每一页
+                page = pdf_reader.getPage(page_num)
+                # 提取文本内容
+                content.append(page.extractText())
+            return content
+    except FileNotFoundError:
+        logger.error(f"文件未找到，请检查路径是否正确: {filepath}")
+        return None
+    except KeyError:
+        logger.error("无法提取文本，可能因为PDF是扫描图像或加密。")
+        return None
+    except Exception as e:
+        logger.error(f"读取PDF文件时发生错误: {e}")
+        return None
 
 def gen_summ(question, title, text, lang):
     if lang == 'Chinese':
