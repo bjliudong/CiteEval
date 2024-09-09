@@ -130,13 +130,24 @@ def get_pdf_content(url, conversation_hash, timeout=5, max_download_time=300):
     try:
         # 尝试打开PDF文件并读取文本
         with pymupdf.open(file_path) as doc:
-            text = '\n'.join([page.get_text() for page in doc])
+            text = ""
+            for page in doc:
+                try:
+                    page_text = page.get_text()
+                    text += page_text + "\n"
+                except Exception as e:
+                    logger.warning(f"无法读取第 {page.number} 页: {str(e)}")
+            
+            if not text.strip():
+                logger.warning("PDF文件似乎是空的或无法提取文本")
+            else:
+                text = text.strip()  # 移除开头和结尾的空白字符
         logger.info(f"读取：{file_path}文件内容成功！")
         return text, file_name
-    except pymupdf.errors.MuPDFError as e:
+    except pymupdf.errors.FileDataError as e:
         if "zlib error: invalid distance too far back" in str(e):
             logger.error(f"PDF文件可能已损坏或格式不正确：{e}")
-        elif "syntax error" in str(e):
+        elif "syntax error: invalid key in dict" in str(e):
             logger.error(f"PDF文件可能包含语法错误：{e}")
         else:
             logger.error(f"打开或读取PDF文件时发生MuPDF错误：{e}")
